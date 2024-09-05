@@ -1,1 +1,1 @@
-Projects and Casestudies associated with GEO-511 Spatial Data Science :)
+Projects and case studies associated with GEO-511 Spatial Data Science :)
