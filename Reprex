@@ -1,0 +1,289 @@
+library("sf")
+#> Warning: package 'sf' was built under R version 4.3.3
+#> Linking to GEOS 3.11.2, GDAL 3.8.2, PROJ 9.3.1; sf_use_s2() is TRUE
+library("terra")
+#> Warning: package 'terra' was built under R version 4.3.3
+#> terra 1.7.83
+library("lidR")
+#> Warning: package 'lidR' was built under R version 4.3.3
+#> 
+#> Attaching package: 'lidR'
+#> The following objects are masked from 'package:terra':
+#> 
+#>     area, crs, crs<-, is.empty, watershed
+#> The following object is masked from 'package:sf':
+#> 
+#>     st_concave_hull
+library("future")
+#> Warning: package 'future' was built under R version 4.3.3
+library("raster")
+#> Warning: package 'raster' was built under R version 4.3.3
+#> Loading required package: sp
+#> Warning: package 'sp' was built under R version 4.3.3
+#> 
+#> Attaching package: 'sp'
+#> The following object is masked from 'package:lidR':
+#> 
+#>     wkt
+#> 
+#> Attaching package: 'raster'
+#> The following objects are masked from 'package:lidR':
+#> 
+#>     projection, projection<-
+library("ggplot2")
+#> Warning: package 'ggplot2' was built under R version 4.3.3
+library("dplyr")
+#> Warning: package 'dplyr' was built under R version 4.3.3
+#> 
+#> Attaching package: 'dplyr'
+#> The following objects are masked from 'package:raster':
+#> 
+#>     intersect, select, union
+#> The following objects are masked from 'package:terra':
+#> 
+#>     intersect, union
+#> The following objects are masked from 'package:stats':
+#> 
+#>     filter, lag
+#> The following objects are masked from 'package:base':
+#> 
+#>     intersect, setdiff, setequal, union
+library("dbscan")
+#> Warning: package 'dbscan' was built under R version 4.3.3
+#> 
+#> Attaching package: 'dbscan'
+#> The following object is masked from 'package:stats':
+#> 
+#>     as.dendrogram
+library("tidyverse")
+#> Warning: package 'tidyverse' was built under R version 4.3.3
+library("stringr")
+library("leaflet")
+#> Warning: package 'leaflet' was built under R version 4.3.3
+library("proj4")
+#> 
+#> Attaching package: 'proj4'
+#> The following object is masked from 'package:terra':
+#> 
+#>     project
+library("reprex")
+#> Warning: package 'reprex' was built under R version 4.3.3
+
+## Reading laz/las data
+las <- readLAS("C:/Users/Tinanope28/Documents/School/Fall 2024/Spatial Data Science/Letchworth_Teaching_Forest_Lidar.laz", select = "-keep_first -keep_class 3 4 5")
+original_bbox <- st_bbox(las)
+
+## Creating Bounding Box
+polygon_coords <- matrix(c(
+  1388000, 2349355, #right bottom corner
+  1388000, 2349700, #right top corner
+  1387450, 2349700, #mid top corner
+  1387450, 2349450, #mid mid corner
+  1387300, 2349200, #left bottom corner
+  1387350, 2349200, #mid bottom corner
+  1388000, 2349355  #right bottom corner
+), ncol = 2, byrow = TRUE)
+
+
+
+## Bounding Box has been given CRS associated with las-CRS 
+polygon_sf <- st_sfc(st_polygon(list(polygon_coords)),  crs = st_crs(las))
+
+plot(polygon_sf)
+
+## Clipped LAS to only include the bounding box (polygon_coords)
+las_clipped <- lidR::clip_roi(las, polygon_sf)
+
+plot(las_clipped)
+
+
+## Filter out any OUTliers z-values from las
+filterOUT_las <- filter_poi(las_clipped, Z >= 182, Z <= 220)
+plot(filterOUT_las)
+
+## Reproject the las to 4326 for Leaflet
+las84 <- st_as_sf(las_clipped, coords = c("X", "Y"), crs = 26918) # crs was NAD83(2011)
+las84 <- st_transform(las_clipped, crs = 4326)
+
+## Create a dataframe of points lat and long to check if st_transform worked  
+las_df <- data.frame(lat = st_coordinates(las84)[, 2],
+                     long = st_coordinates(las84)[, 1])
+
+unique(las_df$lat)
+#> [1] 43.005 43.006 43.007 43.009 43.008
+unique(las_df$long)
+#>  [1] -78.797 -78.796 -78.795 -78.794 -78.793 -78.792 -78.791 -78.790 -78.789
+#> [10] -78.788 -78.787
+
+## LidR functions to find individual trees
+chm <- rasterize_canopy(filterOUT_las, 0.25, pitfree(subcircle = 1))
+#> Delaunay rasterization[=============================================-----] 90% (8 threads)Delaunay rasterization[=============================================-----] 91% (8 threads)Delaunay rasterization[==============================================----] 92% (8 threads)Delaunay rasterization[==============================================----] 93% (8 threads)Delaunay rasterization[===============================================---] 94% (8 threads)Delaunay rasterization[===============================================---] 95% (8 threads)Delaunay rasterization[================================================--] 96% (8 threads)Delaunay rasterization[================================================--] 97% (8 threads)Delaunay rasterization[=================================================-] 98% (8 threads)Delaunay rasterization[=================================================-] 99% (8 threads)Delaunay rasterization[==================================================] 100% (8 threads)
+
+# tree_tops <- locate_trees(filterOUT_las, lmf (ws= 25)) #ws = 25 is nice # this is usless #
+# plot(chm, col = height.colors(15))
+# plot(st_geometry(tree_tops), add = TRUE, col = "black",  pch= 7)
+
+#INDtrees <- segment_trees(filtered_Letch, li2012())
+
+#plot(INDtrees , color = "treeID",  pal = random.colors(100))
+
+## Segment out trees
+seg <- segment_trees(filterOUT_las, li2012())
+#> Tree segmentation: 4% (1 threads)Tree segmentation: 5% (1 threads)Tree segmentation: 6% (1 threads)Tree segmentation: 7% (1 threads)Tree segmentation: 8% (1 threads)Tree segmentation: 9% (1 threads)Tree segmentation: 10% (1 threads)Tree segmentation: 11% (1 threads)Tree segmentation: 12% (1 threads)Tree segmentation: 13% (1 threads)Tree segmentation: 14% (1 threads)Tree segmentation: 15% (1 threads)Tree segmentation: 16% (1 threads)Tree segmentation: 17% (1 threads)Tree segmentation: 18% (1 threads)Tree segmentation: 19% (1 threads)Tree segmentation: 20% (1 threads)Tree segmentation: 21% (1 threads)Tree segmentation: 22% (1 threads)Tree segmentation: 23% (1 threads)Tree segmentation: 24% (1 threads)Tree segmentation: 25% (1 threads)Tree segmentation: 26% (1 threads)Tree segmentation: 27% (1 threads)Tree segmentation: 28% (1 threads)Tree segmentation: 29% (1 threads)Tree segmentation: 30% (1 threads)Tree segmentation: 31% (1 threads)Tree segmentation: 32% (1 threads)Tree segmentation: 33% (1 threads)Tree segmentation: 34% (1 threads)Tree segmentation: 35% (1 threads)Tree segmentation: 36% (1 threads)Tree segmentation: 37% (1 threads)Tree segmentation: 38% (1 threads)Tree segmentation: 39% (1 threads)Tree segmentation: 40% (1 threads)Tree segmentation: 41% (1 threads)Tree segmentation: 42% (1 threads)Tree segmentation: 43% (1 threads)Tree segmentation: 44% (1 threads)Tree segmentation: 45% (1 threads)Tree segmentation: 46% (1 threads)Tree segmentation: 47% (1 threads)Tree segmentation: 48% (1 threads)Tree segmentation: 49% (1 threads)Tree segmentation: 50% (1 threads)Tree segmentation: 51% (1 threads)Tree segmentation: 52% (1 threads)Tree segmentation: 53% (1 threads)Tree segmentation: 54% (1 threads)Tree segmentation: 55% (1 threads)Tree segmentation: 56% (1 threads)Tree segmentation: 57% (1 threads)Tree segmentation: 58% (1 threads)Tree segmentation: 59% (1 threads)Tree segmentation: 60% (1 threads)Tree segmentation: 61% (1 threads)Tree segmentation: 62% (1 threads)Tree segmentation: 63% (1 threads)Tree segmentation: 64% (1 threads)Tree segmentation: 65% (1 threads)Tree segmentation: 66% (1 threads)Tree segmentation: 67% (1 threads)Tree segmentation: 68% (1 threads)Tree segmentation: 69% (1 threads)Tree segmentation: 70% (1 threads)Tree segmentation: 71% (1 threads)Tree segmentation: 72% (1 threads)Tree segmentation: 73% (1 threads)Tree segmentation: 74% (1 threads)Tree segmentation: 75% (1 threads)Tree segmentation: 76% (1 threads)Tree segmentation: 77% (1 threads)Tree segmentation: 78% (1 threads)Tree segmentation: 79% (1 threads)Tree segmentation: 80% (1 threads)Tree segmentation: 81% (1 threads)Tree segmentation: 82% (1 threads)Tree segmentation: 83% (1 threads)Tree segmentation: 84% (1 threads)Tree segmentation: 85% (1 threads)Tree segmentation: 86% (1 threads)Tree segmentation: 87% (1 threads)Tree segmentation: 88% (1 threads)Tree segmentation: 89% (1 threads)Tree segmentation: 90% (1 threads)Tree segmentation: 91% (1 threads)Tree segmentation: 92% (1 threads)Tree segmentation: 93% (1 threads)Tree segmentation: 94% (1 threads)Tree segmentation: 95% (1 threads)Tree segmentation: 96% (1 threads)Tree segmentation: 97% (1 threads)Tree segmentation: 98% (1 threads)Tree segmentation: 99% (1 threads)
+plot(seg, color = "treeID",  pal = random.colors(100))
+
+kernel <- matrix (1, 3, 3)
+chm_smoothed <- terra::focal(chm, w = kernel, fun = median, na.rm = TRUE)
+treetops<- locate_trees(chm_smoothed, lmf(5))
+
+Ind_Tree_Seg_Algo <- dalponte2016(chm_smoothed, treetops)
+seg_trees<- segment_trees(filterOUT_las, Ind_Tree_Seg_Algo)
+
+#plot(seg_trees, bg = "white", size = 4, color = "treeID", height = TRUE, treetops = TRUE)     
+
+## Make a datafame for all tree tops
+tree_top_coords <- as.data.frame(treetops)  ## treetops has GEOMETRY
+
+tree_coords <- tree_top_coords %>%
+  separate("geometry", into = c("V1","V2","x","y","z"), sep = " ")
+#> Warning: Expected 5 pieces. Missing pieces filled with `NA` in 2882 rows [1, 2, 3, 4, 5,
+#> 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, ...].
+
+tree_coords$X <- str_replace_all (tree_coords$V1, c("[c(]" = "", "[,]" =""))
+tree_coords$Y <- str_replace_all (tree_coords$V2, c("[,]" = ""))
+tree_coords[,3:7] <- NULL
+
+tree_coords$X <- as.numeric(tree_coords$X)
+tree_coords$Y <- as.numeric(tree_coords$Y)
+tree_coords$Z <- as.numeric(tree_coords$Z)
+
+##90% percentile of above average of height
+nintypercent <- quantile(tree_coords$Z, 0.9)
+tall_trees <- tree_coords[tree_coords$Z > nintypercent,]
+
+## Spatial Clustering Calculations
+dbscan_result <- dbscan(tall_trees[, c("X", "Y")], eps = 9, minPts = 3)
+
+tall_trees$cluster <- dbscan_result$cluster
+
+## Plotting
+
+
+
+
+
+# bbox_nad83 <- st_sfc(
+#   st_polygon(list(matrix(c(1387000, 2349000,  # xmin, ymin
+#                            1388000, 2349000,  # xmax, ymin
+#                            1388000, 2350000,  # xmax, ymax
+#                            1387000, 2350000,  # xmin, ymax
+#                            1387000, 2349000),  # Close the polygon
+#                          ncol = 2, byrow = TRUE))),
+#   crs = 26918)
+
+# westbc <- -78.80080955676338
+# eastbc <- -78.78645710888594
+# northbc <- 43.01277702813885
+# southbc <- 43.00235971709243
+
+# las84 <- st_as_sf(las_clipped, coords = c("X", "Y"), crs = 26918) # crs was NAD83(2011)
+# las84 <- st_transform(las_clipped, crs = 4326)
+
+tall_trees_WSG <- st_as_sf(tall_trees, coords = c("X", "Y"), crs = 26918) # crs was NAD83(2011)
+tall_trees_WSG <- st_transform(tall_trees_WSG, crs = 4326)
+tall_trees_WSG_df <- data.frame(lat = st_coordinates(tall_trees_WSG)[, 2],
+                     long = st_coordinates(tall_trees_WSG)[, 1])
+
+unique(tall_trees_WSG_df$lat)
+#>   [1] 21.03290 21.03292 21.03290 21.03287 21.03285 21.03282 21.03279 21.03280
+#>   [9] 21.03277 21.03276 21.03267 21.03273 21.03264 21.03267 21.03262 21.03265
+#>  [17] 21.03256 21.03254 21.03251 21.03245 21.03245 21.03244 21.03246 21.03236
+#>  [25] 21.03236 21.03234 21.03216 21.03204 21.03196 21.03184 21.03190 21.03183
+#>  [33] 21.03180 21.03179 21.03178 21.03174 21.03172 21.03172 21.03171 21.03171
+#>  [41] 21.03177 21.03168 21.03165 21.03173 21.03164 21.03167 21.03171 21.03168
+#>  [49] 21.03167 21.03164 21.03169 21.03167 21.03167 21.03166 21.03167 21.03161
+#>  [57] 21.03166 21.03161 21.03163 21.03164 21.03164 21.03162 21.03161 21.03164
+#>  [65] 21.03159 21.03163 21.03160 21.03157 21.03161 21.03163 21.03160 21.03162
+#>  [73] 21.03161 21.03158 21.03157 21.03158 21.03157 21.03157 21.03155 21.03157
+#>  [81] 21.03153 21.03151 21.03150 21.03152 21.03153 21.03149 21.03149 21.03150
+#>  [89] 21.03148 21.03146 21.03146 21.03147 21.03145 21.03146 21.03143 21.03142
+#>  [97] 21.03141 21.03144 21.03144 21.03142 21.03141 21.03139 21.03140 21.03136
+#> [105] 21.03137 21.03136 21.03138 21.03132 21.03133 21.03130 21.03130 21.03128
+#> [113] 21.03130 21.03128 21.03124 21.03125 21.03122 21.03121 21.03119 21.03119
+#> [121] 21.03120 21.03119 21.03116 21.03115 21.03116 21.03117 21.03115 21.03113
+#> [129] 21.03113 21.03111 21.03111 21.03113 21.03112 21.03109 21.03108 21.03106
+#> [137] 21.03110 21.03107 21.03109 21.03106 21.03110 21.03107 21.03108 21.03109
+#> [145] 21.03104 21.03104 21.03106 21.03104 21.03103 21.03107 21.03103 21.03104
+#> [153] 21.03100 21.03099 21.03103 21.03101 21.03097 21.03100 21.03097 21.03100
+#> [161] 21.03099 21.03103 21.03096 21.03101 21.03100 21.03099 21.03097 21.03101
+#> [169] 21.03101 21.03099 21.03098 21.03097 21.03094 21.03094 21.03096 21.03096
+#> [177] 21.03096 21.03093 21.03094 21.03096 21.03099 21.03096 21.03094 21.03091
+#> [185] 21.03092 21.03090 21.03093 21.03091 21.03093 21.03091 21.03088 21.03089
+#> [193] 21.03087 21.03089 21.03088 21.03088 21.03091 21.03088 21.03088 21.03089
+#> [201] 21.03086 21.03085 21.03086 21.03083 21.03086 21.03086 21.03083 21.03084
+#> [209] 21.03082 21.03082 21.03082 21.03082 21.03081 21.03083 21.03083 21.03082
+#> [217] 21.03081 21.03080 21.03082 21.03081 21.03079 21.03079 21.03078 21.03081
+#> [225] 21.03079 21.03078 21.03081 21.03080 21.03076 21.03075 21.03073 21.03075
+#> [233] 21.03073 21.03072 21.03071 21.03073 21.03071 21.03074 21.03072 21.03071
+#> [241] 21.03071 21.03070 21.03070 21.03068 21.03071 21.03067 21.03067 21.03068
+#> [249] 21.03071 21.03069 21.03067 21.03064 21.03065 21.03066 21.03065 21.03062
+#> [257] 21.03061 21.03061 21.03064 21.03062 21.03061 21.03061 21.03060 21.03058
+#> [265] 21.03057 21.03058 21.03059 21.03057 21.03055 21.03054 21.03053 21.03054
+#> [273] 21.03055 21.03053 21.03052 21.03053 21.03051 21.03051 21.03051 21.03050
+#> [281] 21.03049 21.03050 21.03049 21.03047 21.03045 21.03046 21.03045 21.03043
+#> [289] 21.03042
+unique(tall_trees_WSG_df$long)
+#>   [1] -66.47943 -66.47985 -66.47990 -66.47942 -66.47986 -66.47988 -66.47922
+#>   [8] -66.47988 -66.47986 -66.47992 -66.47883 -66.48008 -66.47886 -66.48009
+#>  [15] -66.47952 -66.48007 -66.47987 -66.47972 -66.48002 -66.47886 -66.47955
+#>  [22] -66.47952 -66.48007 -66.47895 -66.47912 -66.48060 -66.48076 -66.48084
+#>  [29] -66.48086 -66.47944 -66.48083 -66.47940 -66.47938 -66.47948 -66.47943
+#>  [36] -66.47926 -66.47928 -66.47936 -66.47941 -66.47931 -66.48085 -66.47923
+#>  [43] -66.47928 -66.48096 -66.47920 -66.47995 -66.48089 -66.48073 -66.48042
+#>  [50] -66.47996 -66.48119 -66.48084 -66.48093 -66.48088 -66.48121 -66.47996
+#>  [57] -66.48105 -66.48018 -66.48070 -66.48092 -66.48086 -66.48066 -66.48044
+#>  [64] -66.48128 -66.48025 -66.48117 -66.48042 -66.47996 -66.48072 -66.48120
+#>  [71] -66.48077 -66.48126 -66.48103 -66.48069 -66.48074 -66.48092 -66.48114
+#>  [78] -66.48098 -66.48084 -66.48125 -66.48062 -66.48069 -66.48035 -66.48079
+#>  [85] -66.48125 -66.48071 -66.48093 -66.48119 -66.48096 -66.48065 -66.48073
+#>  [92] -66.48101 -66.48079 -66.48125 -66.48085 -66.48069 -66.48077 -66.48132
+#>  [99] -66.48144 -66.48117 -66.48094 -66.48099 -66.48128 -66.48059 -66.48089
+#> [106] -66.48066 -66.48132 -66.48067 -66.48088 -66.48094 -66.48121 -66.48080
+#> [113] -66.48152 -66.48102 -66.48094 -66.48154 -66.48085 -66.48137 -66.48107
+#> [120] -66.48124 -66.48153 -66.48139 -66.48110 -66.48093 -66.48121 -66.48164
+#> [127] -66.48161 -66.48119 -66.48147 -66.48126 -66.48131 -66.48188 -66.48185
+#> [134] -66.48122 -66.48106 -66.48090 -66.48173 -66.48112 -66.48159 -66.48094
+#> [141] -66.48178 -66.48126 -66.48150 -66.48190 -66.48101 -66.48118 -66.48173
+#> [148] -66.48133 -66.48121 -66.48194 -66.48128 -66.48146 -66.48066 -66.48054
+#> [155] -66.48155 -66.48119 -66.48046 -66.48128 -66.48069 -66.48125 -66.48107
+#> [162] -66.48202 -66.48064 -66.48172 -66.48147 -66.48138 -66.48094 -66.48187
+#> [169] -66.48184 -66.48154 -66.48136 -66.48111 -66.48054 -66.48065 -66.48118
+#> [176] -66.48122 -66.48133 -66.48074 -66.48105 -66.48144 -66.48198 -66.48151
+#> [183] -66.48127 -66.48076 -66.48086 -66.48065 -66.48136 -66.48097 -66.48164
+#> [190] -66.48119 -66.48077 -66.48104 -66.48068 -66.48110 -66.48098 -66.48089
+#> [197] -66.48177 -66.48130 -66.48126 -66.48150 -66.48094 -66.48086 -66.48114
+#> [204] -66.48049 -66.48136 -66.48146 -66.48091 -66.48105 -66.48078 -66.48083
+#> [211] -66.48101 -66.48098 -66.48087 -66.48136 -66.48140 -66.48131 -66.48118
+#> [218] -66.48115 -66.48144 -66.48128 -66.48095 -66.48105 -66.48102 -66.48170
+#> [225] -66.48134 -66.48115 -66.48193 -66.48190 -66.48141 -66.48129 -66.48120
+#> [232] -66.48148 -66.48125 -66.48113 -66.48105 -66.48153 -66.48110 -66.48173
+#> [239] -66.48137 -66.48133 -66.48150 -66.48141 -66.48127 -66.48116 -66.48193
+#> [246] -66.48123 -66.48128 -66.48160 -66.48230 -66.48184 -66.48192 -66.48136
+#> [253] -66.48154 -66.48196 -66.48176 -66.48133 -66.48118 -66.48128 -66.48184
+#> [260] -66.48144 -66.48158 -66.48151 -66.48177 -66.48141 -66.48139 -66.48165
+#> [267] -66.48183 -66.48148 -66.48140 -66.48153 -66.48147 -66.48162 -66.48179
+#> [274] -66.48172 -66.48167 -66.48190 -66.48160 -66.48184 -66.48197 -66.48165
+#> [281] -66.48171 -66.48187 -66.48192 -66.48173 -66.48164 -66.48194 -66.48175
+#> [288] -66.48171 -66.48167
+
+
+Final_data_frame <- select(tall_trees_WSG, treeID, Z, cluster, geometry)
+                         
+
+leaflet(data = tall_trees_WSG) %>%
+  addTiles() %>%  
+  addMarkers(radius = 5, color = "red", fillOpacity = 0.5,
+  ) %>%
+  setView(lng = -78.793, lat = 43.007, zoom = 13)  
+#> Error in addMarkers(., radius = 5, color = "red", fillOpacity = 0.5, ): unused arguments (radius = 5, color = "red", fillOpacity = 0.5)
+Created on 2024-11-16 with reprex v2.1.1
